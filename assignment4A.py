@@ -22,26 +22,27 @@ import torch
 
 
 def create_matrix_of_size_d(d: int):
-    M = np.zeros((d, d), dtype=np.float32)
+    def choose(n, r):
+        return math.factorial(n) / math.factorial(r) / math.factorial(n - r)
+
+    M = np.zeros((d, d))
 
     for j in range(0, d):
         for i in range(0, j + 1):
-            M[i, d - 1 - j] = (1.0 if (j - i) % 2 == 0 else -1.0) * math.comb(d - 1 - i, j - i) \
-                              * math.comb(d - 1, i)
+            M[i, d - 1 - j] = (1.0 if (j - i) % 2 == 0 else -1.0) * choose(d - 1 - i, j - i) \
+                              * choose(d - 1, i)
 
     return M
 
 
-def bezierD(d, f, a, b):
-    Xs = np.linspace(a, b, 10000)
-    Ys = f(Xs)
-
-    P = torch.stack([Xs, Ys])
-    Md = create_matrix_of_size_d(d + 1)
+def bezierD(Md, Cfit, d):
+    P = torch.tensor(Cfit)
 
     def f(t):
-        T = torch.stack([t ** i for i in range(d, -1, -1)], dtype=np.float32)
-        return T.dot(Md).dot(P)
+        T = torch.DoubleTensor([t ** i for i in range(d, -1, -1)])
+        T = T.view(1, len(T))
+        T = T.mm(Md)
+        return T.mm(P)
 
     return f
 
@@ -77,8 +78,38 @@ class Assignment4A:
         -------
         a function:float->float that fits f between a and b
         """
+        n = d
+        Xs = np.linspace(a, b, n)
+        Ys = f(Xs)
 
-        return bezierD(d, f, a, b)
+        Md = create_matrix_of_size_d(d + 1)
+
+        P = torch.DoubleTensor([Xs, Ys])
+        
+        t = torch.tensor(np.linspace(0.0, 1.0, n))
+        T = torch.stack([t ** i for i in range(d, -1, -1)]).T
+
+        Mdtens = torch.tensor(Md)
+        Cfit = Mdtens.inverse().mm((T.T.mm(T)).inverse()).mm(T.T).mm(P.T)
+        gamma = bezierD(Mdtens, Cfit, d)
+
+        coeff = [0.] * (d + 1)
+        for i in range(d + 1):
+            s = 0
+            for j in range(d + 1):
+                s += Cfit[j][0] * Md[i, j]
+            coeff[i] = s
+
+        def result(x):
+            coeff[-1] -= x
+            roots = np.roots(coeff)
+
+            root = [x for x in roots if (0 <= x <= 1 and np.isreal(x))]
+            realNum = np.real(root[0])
+            point = gamma(realNum)
+            return point[0][1]
+
+        return result
 
 
 ##########################################################################
